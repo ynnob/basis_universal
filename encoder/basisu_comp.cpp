@@ -345,19 +345,36 @@ namespace basisu
 
 		return true;
 	}
-		
+
+	bool basis_compressor::is_cancelled() const
+	{
+		return m_params.m_is_cancellation_requested && m_params.m_is_cancellation_requested(m_params.m_cancel_context);
+	}
+
 	basis_compressor::error_code basis_compressor::process()
 	{
 		debug_printf("basis_compressor::process\n");
 
+		if (is_cancelled())
+			return cECCancelled;
+
 		if (!read_dds_source_images())
 			return cECFailedReadingSourceImages;
+
+		if (is_cancelled())
+			return cECCancelled;
 
 		if (!read_source_images())
 			return cECFailedReadingSourceImages;
 
+		if (is_cancelled())
+			return cECCancelled;
+
 		if (!validate_texture_type_constraints())
 			return cECFailedValidating;
+
+		if (is_cancelled())
+			return cECCancelled;
 
 		if (m_params.m_create_ktx2_file)
 		{
@@ -368,8 +385,14 @@ namespace basisu
 			}
 		}
 
+		if (is_cancelled())
+			return cECCancelled;
+
 		if (!extract_source_blocks())
 			return cECFailedFrontEnd;
+
+		if (is_cancelled())
+			return cECCancelled;
 
 		if (m_params.m_hdr)
 		{
@@ -400,21 +423,36 @@ namespace basisu
 			if (!process_frontend())
 				return cECFailedFrontEnd;
 
+			if (is_cancelled())
+				return cECCancelled;
+
 			if (!extract_frontend_texture_data())
 				return cECFailedFontendExtract;
+
+			if (is_cancelled())
+				return cECCancelled;
 
 			if (!process_backend())
 				return cECFailedBackend;
 		}
 
+		if (is_cancelled())
+			return cECCancelled;
+
 		if (!create_basis_file_and_transcode())
 			return cECFailedCreateBasisFile;
+
+		if (is_cancelled())
+			return cECCancelled;
 
 		if (m_params.m_create_ktx2_file)
 		{
 			if (!create_ktx2_file())
 				return cECFailedCreateKTX2File;
 		}
+
+		if (is_cancelled())
+			return cECCancelled;
 
 		if (!write_output_files_and_compute_stats())
 			return cECFailedWritingOutput;
@@ -3467,12 +3505,22 @@ namespace basisu
 		std::atomic<bool> opencl_failed;
 		opencl_failed = false;
 
+		std::atomic<bool> cancelled;
+		cancelled = false;
+
 		for (uint32_t pindex = 0; pindex < params_vec.size(); pindex++)
 		{
-			jpool.add_job([pindex, &params_vec, &results_vec, &result, &opencl_failed, &jpool] {
+			jpool.add_job([pindex, &params_vec, &results_vec, &result, &opencl_failed, &jpool, &cancelled] {
 
 				basis_compressor_params params = params_vec[pindex];
 				parallel_results& results = results_vec[pindex];
+
+				if (cancelled)
+				{
+					results.m_error_code = basis_compressor::cECCancelled;
+					result = false;
+					return;
+				}
 
 				interval_timer tm;
 				tm.start();
@@ -3511,6 +3559,8 @@ namespace basisu
 					}
 					else
 					{
+						if (ec == basis_compressor::cECCancelled)
+							cancelled = true;
 						result = false;
 					}
 				}
@@ -3531,7 +3581,7 @@ namespace basisu
 		if (opencl_failed)
 			error_printf("An OpenCL error occured sometime during compression. The compressor fell back to CPU processing after the failure.\n");
 
-		return result;
+		return result && !cancelled;
 	}
 
 	static void* basis_compress(

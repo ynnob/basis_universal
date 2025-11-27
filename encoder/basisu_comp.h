@@ -328,6 +328,8 @@ namespace basisu
 			m_hdr_favor_astc.clear();
 			
 			m_pJob_pool = nullptr;
+			m_is_cancellation_requested = nullptr;
+			m_cancel_context = nullptr;
 		}
 						
 		// True to generate UASTC .basis/.KTX2 file data, otherwise ETC1S.
@@ -475,8 +477,12 @@ namespace basisu
 
 		// If true, ASTC HDR quality is favored more than BC6H quality. Otherwise it's a rough balance.
 		bool_param<false> m_hdr_favor_astc;
-						
+		
 		job_pool *m_pJob_pool;
+
+		// Optional cooperative cancellation hook
+		bool (*m_is_cancellation_requested)(void* user);
+		void* m_cancel_context;
 	};
 
 	// Important: basisu_encoder_init() MUST be called first before using this class.
@@ -504,7 +510,8 @@ namespace basisu
 			cECFailedCreateBasisFile,
 			cECFailedWritingOutput,
 			cECFailedUASTCRDOPostProcess,
-			cECFailedCreateKTX2File
+			cECFailedCreateKTX2File,
+			cECCancelled
 		};
 
 		error_code process();
@@ -526,6 +533,8 @@ namespace basisu
 								
 	private:
 		basis_compressor_params m_params;
+
+		bool is_cancelled() const;
 
 		opencl_context_ptr m_pOpenCL_context;
 		
